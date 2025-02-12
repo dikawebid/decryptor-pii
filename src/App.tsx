@@ -24,6 +24,7 @@ function App() {
 	const [isLoading, setIsLoading] = useState(false);
 	const [isLoadingExportCSV, setIsLoadingExportCSV] = useState(false);
 	const [isLoadingExportXLSX, setIsLoadingExportXLSX] = useState(false);
+	const [algorithm, setAlgorithm] = useState("aes-256-cbc");
 	const [encryptionKey, setEncryptionKey] = useState("");
 	const [isSetEncryptionKey, setIsSetEncryptionKey] = useState(false);
 	const [currentPage, setCurrentPage] = useState(1);
@@ -83,7 +84,16 @@ function App() {
 	async function decryptAes(str: string): Promise<string> {
 		try {
 			const decoder = new TextDecoder();
-			const decrypted = await aes.decryptWithAes256Cbc(encryptionKey, str);
+			let decrypted = await aes.decryptWithAes256Cbc(encryptionKey, str);
+
+			if (algorithm === "aes-128-cbc") {
+				decrypted = await aes.decryptWithAes128Cbc(encryptionKey, str);
+			} else if (algorithm === "aes-128-gcm") {
+				decrypted = await aes.decryptWithAes128Gcm(encryptionKey, str);
+			} else if (algorithm === "aes-256-gcm") {
+				decrypted = await aes.decryptWithAes256Gcm(encryptionKey, str);
+			}
+
 			return decoder.decode(decrypted).toString();
 		} catch (error) {
 			return str;
@@ -183,13 +193,32 @@ function App() {
 
 			<div className="bg-white rounded-lg shadow-md p-6 mb-6">
 				<div className="mb-4">
-					<label htmlFor="token" className="block text-sm font-medium text-gray-700 mb-2">
+					<label htmlFor="algorithm" className="block text-sm font-medium text-gray-700 mb-2">
+						Algorithm
+					</label>
+					<div className="flex gap-4">
+						<select
+							id="algorithm"
+							disabled={isSetEncryptionKey}
+							value={algorithm}
+							onChange={(e) => setAlgorithm(e.target.value)}
+							className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+						>
+							<option value="aes-128-cbc">AES-128-CBC</option>
+							<option value="aes-256-cbc">AES-256-CBC</option>
+							<option value="aes-128-gcm">AES-128-GCM</option>
+							<option value="aes-256-gcm">AES-256-GCM</option>
+						</select>
+					</div>
+				</div>
+				<div className="mb-4">
+					<label htmlFor="key" className="block text-sm font-medium text-gray-700 mb-2">
 						Key
 					</label>
 					<div className="flex gap-4">
 						<input
 							type="text"
-							id="token"
+							id="key"
 							disabled={isSetEncryptionKey}
 							value={encryptionKey}
 							onChange={(e) => setEncryptionKey(e.target.value)}
