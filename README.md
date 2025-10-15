@@ -49,3 +49,8 @@ Pull requests are welcome—especially during Hacktoberfest! Please keep changes
 
 ## License
 No explicit license is provided yet. If you plan to use this project beyond local experimentation, please reach out or open an issue to clarify licensing.
+
+## Contributors
+Thanks to all who have contributed to this project!
+
+- [@rbayuokt](https://github.com/rbayuokt)
