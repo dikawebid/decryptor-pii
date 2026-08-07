@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { read, utils, write } from 'xlsx';
-import {Eye, EyeOff, Upload, Loader2, FileSpreadsheet, FileDown, Key, FileText, Lock, Unlock} from 'lucide-react';
+import { Eye, EyeOff, Upload, Loader2, FileSpreadsheet, FileDown, Key, FileText, Lock, Unlock } from 'lucide-react';
 import JSZip from "jszip";
 import { saveAs } from 'file-saver';
 import { aes } from 'crypsi.js';
@@ -21,7 +21,9 @@ function App() {
 
 	const [activeTab, setActiveTab] = useState<'excel' | 'text'>('excel');
 	const [tableData, setTableData] = useState<TableData | null>(null);
-	const [encryptedColumns, setEncryptedColumns] = useState<{ [key: string]: boolean }>({});
+	type ColumnOp = 'encrypt' | 'decrypt' | 'none';
+	const [columnOperation, setColumnOperation] = useState<{ [key: string]: ColumnOp }>({});
+	const [detectedStatus, setDetectedStatus] = useState<{ [key: string]: boolean }>({});
 	const [isLoading, setIsLoading] = useState(false);
 	const [isLoadingExportCSV, setIsLoadingExportCSV] = useState(false);
 	const [isLoadingExportXLSX, setIsLoadingExportXLSX] = useState(false);
@@ -37,6 +39,14 @@ function App() {
 	const [outputText, setOutputText] = useState('');
 	const [textOperation, setTextOperation] = useState<'encrypt' | 'decrypt'>('encrypt');
 
+	async function detectIfEncrypted(value: any): Promise<boolean> {
+		const str = value == null ? '' : String(value);
+		if (!str) return false;
+		const original = str;
+		const decrypted = await decryptAes(str);
+		return decrypted !== original;
+	}
+
 	const processFile = useCallback(async (file: File) => {
 		setIsLoading(true);
 		try {
@@ -49,18 +59,38 @@ function App() {
 			const rows = data.slice(1) as any[][];
 
 			setTableData({ headers, rows });
-			const initialEncryption = headers.reduce((acc, header) => ({
+
+			const detectedEncryption: { [key: string]: boolean } = {};
+			await Promise.all(
+				headers.map(async (header) => {
+					const colIndex = headers.indexOf(header);
+					const values = rows
+						.map((row) => row[colIndex])
+						.filter((v) => v != null && String(v).trim() !== '');
+
+					if (values.length === 0) {
+						detectedEncryption[header] = false;
+						return;
+					}
+
+					const results = await Promise.all(values.map(detectIfEncrypted));
+					const encryptedCount = results.filter(Boolean).length;
+					detectedEncryption[header] = encryptedCount > values.length / 2;
+				})
+			);
+			setDetectedStatus(detectedEncryption);
+			const operations: { [key: string]: ColumnOp } = headers.reduce((acc, header) => ({
 				...acc,
-				[header]: false
+				[header]: 'none'
 			}), {});
-			setEncryptedColumns(initialEncryption);
+			setColumnOperation(operations);
 			setCurrentPage(1);
 		} catch (error) {
 			console.error('Error processing file:', error);
 		} finally {
 			setIsLoading(false);
 		}
-	}, []);
+	}, [decryptAes]);
 
 	const onDrop = useCallback((acceptedFiles: File[]) => {
 		const file = acceptedFiles[0];
@@ -81,10 +111,16 @@ function App() {
 	});
 
 	const toggleEncryption = (header: string) => {
-		setEncryptedColumns(prev => ({
-			...prev,
-			[header]: !prev[header]
-		}));
+		setColumnOperation(prev => {
+			const current = prev[header] || 'none';
+			const next = current === 'none'
+				? (detectedStatus[header] ? 'decrypt' : 'encrypt')
+				: 'none';
+			return {
+				...prev,
+				[header]: next
+			};
+		});
 	};
 
 	async function decryptAes(str: string): Promise<string> {
@@ -130,12 +166,12 @@ function App() {
 			alert('Please set an encryption key first');
 			return;
 		}
-		
+
 		if (!inputText) {
 			alert('Please enter text to process');
 			return;
 		}
-		
+
 		if (textOperation === 'encrypt') {
 			const encrypted = await encryptAes(inputText);
 			setOutputText(encrypted);
@@ -150,13 +186,18 @@ function App() {
 		setOutputText('');
 	};
 
-	const processValueForDisplay = async (value: any, isEncrypted: boolean): Promise<string> => {
-		if (value == null) return '';
+	const processValueForDisplay = (value: any, header: string): Promise<string> => {
+		if (value == null || value === '') return Promise.resolve('');
 		const stringValue = String(value);
-		return isEncrypted ? await decryptAes(stringValue) : stringValue;
+		const op = columnOperation[header];
+		if (op === 'decrypt') return decryptAes(stringValue);
+		if (op === 'encrypt') {
+			return detectedStatus[header] ? Promise.resolve(stringValue) : encryptAes(stringValue);
+		}
+		return Promise.resolve(stringValue);
 	};
 
-	// Process data when tableData or encryptedColumns change
+	// Process data when tableData or columnOperation change
 	useEffect(() => {
 		const processData = async () => {
 			if (!tableData) return;
@@ -168,7 +209,7 @@ function App() {
 						tableData.headers.map(async (header, index) => {
 							processedRow[header] = await processValueForDisplay(
 								row[index],
-								encryptedColumns[header]
+								header
 							);
 						})
 					);
@@ -179,7 +220,7 @@ function App() {
 		};
 
 		processData();
-	}, [tableData, encryptedColumns]);
+	}, [tableData, columnOperation]);
 
 	const exportToFile = async (format: 'xlsx' | 'csv') => {
 		if (!tableData) return;
@@ -190,7 +231,7 @@ function App() {
 			...await Promise.all(tableData.rows.map(async (row) =>
 				await Promise.all(row.map(async (cell, index) => {
 					const header = tableData.headers[index];
-					return await processValueForDisplay(cell, encryptedColumns[header]);
+					return await processValueForDisplay(cell, header);
 				}))
 			))
 		];
@@ -202,17 +243,17 @@ function App() {
 		const filename = `exported-data.${format}`;
 		if (format === 'xlsx') {
 			setIsLoadingExportXLSX(true);
-			let wbout = write(wb, {bookType: 'xlsx', bookSST: true, type: 'binary'});
-			zip.file(filename, wbout, {binary: true});
-			zip.generateAsync({ type:"blob" }).then(function(content) {
+			let wbout = write(wb, { bookType: 'xlsx', bookSST: true, type: 'binary' });
+			zip.file(filename, wbout, { binary: true });
+			zip.generateAsync({ type: "blob" }).then(function (content) {
 				saveAs(content, "exported-data.zip");
 				setIsLoadingExportXLSX(false);
 			});
 		} else {
 			setIsLoadingExportCSV(true);
-			let wbout = write(wb, {bookType: 'csv', type: 'binary'});
-			zip.file(filename, wbout, {binary: true});
-			zip.generateAsync({ type:"blob" }).then(function(content) {
+			let wbout = write(wb, { bookType: 'csv', type: 'binary' });
+			zip.file(filename, wbout, { binary: true });
+			zip.generateAsync({ type: "blob" }).then(function (content) {
 				saveAs(content, "exported-data.zip");
 				setIsLoadingExportCSV(false);
 			});
@@ -239,7 +280,7 @@ function App() {
 					<Key className="w-8 h-8 text-blue-600 mr-2" />
 					<h1 className="text-3xl font-bold text-gray-800">Decryptor PII</h1>
 				</div>
-				
+
 				{/* Tab Navigation */}
 				<div className="flex border-b border-gray-200 mb-6">
 					<button
@@ -258,7 +299,7 @@ function App() {
 					</button>
 				</div>
 			</div>
-			
+
 			{activeTab === 'excel' && (
 				<div className="mx-auto">
 					<div className="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -296,7 +337,7 @@ function App() {
 									className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
 								/>
 								<button
-									onClick={(e) => setIsSetEncryptionKey(!isSetEncryptionKey)}
+									onClick={() => setIsSetEncryptionKey(!isSetEncryptionKey)}
 									// disabled={isSetEncryptionKey}
 									className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
 								>
@@ -317,32 +358,32 @@ function App() {
 					</div>
 
 					{isSetEncryptionKey && (
-					<div
-						{...getRootProps()}
-						className={`mb-8 p-8 border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors relative
+						<div
+							{...getRootProps()}
+							className={`mb-8 p-8 border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors relative
 		          ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400'}
 		          ${isLoading ? 'pointer-events-none' : ''}`}
-					>
-						<input {...getInputProps()} />
-						{isLoading ? (
-							<div className="flex flex-col items-center">
-								<Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
-								<p className="text-lg text-blue-600">Processing file...</p>
-							</div>
-						) : (
-							<>
-								<Upload className="mx-auto mb-4 text-gray-400" size={48} />
-								{isDragActive ? (
-									<p className="text-lg text-blue-600">Drop the file here...</p>
-								) : (
-									<div>
-										<p className="text-lg text-gray-600">Drag and drop a CSV or Excel file here</p>
-										<p className="text-sm text-gray-400 mt-2">or click to select a file</p>
-									</div>
-								)}
-							</>
-						)}
-					</div>
+						>
+							<input {...getInputProps()} />
+							{isLoading ? (
+								<div className="flex flex-col items-center">
+									<Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+									<p className="text-lg text-blue-600">Processing file...</p>
+								</div>
+							) : (
+								<>
+									<Upload className="mx-auto mb-4 text-gray-400" size={48} />
+									{isDragActive ? (
+										<p className="text-lg text-blue-600">Drop the file here...</p>
+									) : (
+										<div>
+											<p className="text-lg text-gray-600">Drag and drop a CSV or Excel file here</p>
+											<p className="text-sm text-gray-400 mt-2">or click to select a file</p>
+										</div>
+									)}
+								</>
+							)}
+						</div>
 					)}
 
 					{tableData && (
@@ -371,43 +412,54 @@ function App() {
 							<div className="overflow-x-auto">
 								<table className="min-w-full divide-y divide-gray-200">
 									<thead className="bg-gray-50">
-									<tr>
-										{tableData.headers.map((header, index) => (
-											<th
-												key={index}
-												className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-											>
-												<div className="flex items-center space-x-2">
-													<span>{header}</span>
-													<button
-														onClick={() => toggleEncryption(header)}
-														className="p-1 rounded hover:bg-gray-200 transition-colors"
-														title={encryptedColumns[header] ? "Decrypt column" : "Encrypt column"}
-													>
-														{encryptedColumns[header] ? (
-															<EyeOff className="w-4 h-4 text-red-600" />
-														) : (
-															<Eye className="w-4 h-4 text-green-600" />
-														)}
-													</button>
-												</div>
-											</th>
-										))}
-									</tr>
-									</thead>
-									<tbody className="bg-white divide-y divide-gray-200">
-									{currentRows.map((row, rowIndex) => (
-										<tr key={rowIndex} className="hover:bg-gray-50">
-											{tableData.headers.map((header, colIndex) => (
-												<td
-													key={colIndex}
-													className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"
+										<tr>
+											{tableData.headers.map((header, index) => (
+												<th
+													key={index}
+													className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
 												>
-													{row[header]}
-												</td>
+													<div className="flex items-center space-x-2">
+														<span>{header}</span>
+														<span
+															className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${detectedStatus[header]
+																? 'bg-red-100 text-red-700'
+																: 'bg-green-100 text-green-700'
+																}`}
+															title={detectedStatus[header] ? "Detected as encrypted" : "Detected as plain text"}
+														>
+															{detectedStatus[header] ? 'Encrypted' : 'Plain'}
+														</span>
+														<button
+															onClick={() => toggleEncryption(header)}
+															className="p-1 rounded hover:bg-gray-200 transition-colors"
+															title={columnOperation[header] === 'decrypt' ? "Decrypt column" : columnOperation[header] === 'encrypt' ? "Encrypt column" : "No operation (raw)"}
+														>
+															{columnOperation[header] === 'decrypt' ? (
+																<Lock className="w-4 h-4 text-red-600" />
+															) : columnOperation[header] === 'encrypt' ? (
+																<Lock className="w-4 h-4 text-blue-600" />
+															) : (
+																<Lock className="w-4 h-4 text-gray-600" />
+															)}
+														</button>
+													</div>
+												</th>
 											))}
 										</tr>
-									))}
+									</thead>
+									<tbody className="bg-white divide-y divide-gray-200">
+										{currentRows.map((row, rowIndex) => (
+											<tr key={rowIndex} className="hover:bg-gray-50">
+												{tableData.headers.map((header, colIndex) => (
+													<td
+														key={colIndex}
+														className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"
+													>
+														{row[header]}
+													</td>
+												))}
+											</tr>
+										))}
 									</tbody>
 								</table>
 							</div>
@@ -435,11 +487,10 @@ function App() {
 													{isGap && <span className="px-3 py-1">...</span>}
 													<button
 														onClick={() => setCurrentPage(pageNum)}
-														className={`px-3 py-1 rounded border ${
-															currentPage === pageNum
-																? 'bg-blue-600 text-white border-blue-600'
-																: 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-														}`}
+														className={`px-3 py-1 rounded border ${currentPage === pageNum
+															? 'bg-blue-600 text-white border-blue-600'
+															: 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+															}`}
 													>
 														{pageNum}
 													</button>
@@ -498,7 +549,7 @@ function App() {
 									className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
 								/>
 								<button
-									onClick={(e) => setIsSetEncryptionKey(!isSetEncryptionKey)}
+									onClick={() => setIsSetEncryptionKey(!isSetEncryptionKey)}
 									// disabled={isSetEncryptionKey}
 									className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
 								>
