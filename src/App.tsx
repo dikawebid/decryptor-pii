@@ -475,7 +475,7 @@ function App() {
 									<div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
 										<div className="flex items-center">
 											<div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center mr-3">
-												<Lock className="w-4 h-4 text-blue-600" />
+												{textOperation === 'encrypt' ? <Lock className="w-4 h-4 text-blue-600" /> : <Unlock className="w-4 h-4 text-blue-600" />}
 											</div>
 											<div>
 												<h2 className="text-base font-semibold text-gray-800">
