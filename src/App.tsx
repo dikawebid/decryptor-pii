@@ -10,13 +10,22 @@ function App() {
 	const [activeTab, setActiveTab] = useState<TabId>('excel');
 	const crypto = useCrypto();
 	const {
+		provider,
 		algorithm,
 		encryptionKey,
 		isSetEncryptionKey,
 		setAlgorithm,
+		setProvider,
 		setEncryptionKey,
 		setIsSetEncryptionKey,
 	} = crypto;
+
+	const handleProviderChange = (value: 'crypsi' | 'pii-cyclops') => {
+		setProvider(value);
+		// Providers are incompatible, so clear any stale key from the other library.
+		setEncryptionKey('');
+		setIsSetEncryptionKey(false);
+	};
 
 	return (
 		<div className="min-h-screen bg-gray-50 p-8">
@@ -28,9 +37,11 @@ function App() {
 
 				{/* Configuration — shown first, above the tabs, shared by both tools */}
 				<AlgorithmKeyConfig
+					provider={provider}
 					algorithm={algorithm}
 					encryptionKey={encryptionKey}
 					isSetEncryptionKey={isSetEncryptionKey}
+					onProviderChange={handleProviderChange}
 					onAlgorithmChange={setAlgorithm}
 					onEncryptionKeyChange={setEncryptionKey}
 					onToggleEncryptionKey={() => setIsSetEncryptionKey(!isSetEncryptionKey)}
