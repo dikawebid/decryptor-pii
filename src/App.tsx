@@ -574,7 +574,7 @@ function App() {
 										<div className="mb-2">
 											<div className="flex items-center justify-between mb-2">
 												<label htmlFor="text-output" className="flex items-center text-sm font-medium text-gray-700">
-													<Lock className="w-4 h-4 text-gray-400 mr-2" />
+													{textOperation === 'encrypt' ? <Lock className="w-4 h-4 text-gray-400 mr-2" /> : <Unlock className="w-4 h-4 text-gray-400 mr-2" />}
 													Output
 												</label>
 												<button
